@@ -1,41 +1,29 @@
 #!/usr/bin/env python3
 """
-Attack #5 — Stdout flood (resource exhaustion / integrity vector)
+Attack #1 — Fork bomb (resource exhaustion / privilege escalation vector)
 
-Writes gigabytes of data to stdout. run_tests.sh captures stdout into a shell
-variable (`actual=$(...)`) using command substitution, which means the shell must
-buffer the entire output in memory. This exhausts the VM's 256 MiB RAM just like
-the memory exhaustion attack — but through the I/O path instead of direct allocation.
-
-Additionally, even if the shell doesn't buffer (e.g. the output is redirected), the
-volume of data through the vsock channel may exhaust the agent's vsock write buffer or
-cause the result JSON to be silently truncated.
+Spawns child processes recursively until the OS runs out of PIDs or the VM OOM-kills
+everything. The goal is to crash the entire microVM.
 
 Expected result (both raw and nsjail):
-  - Shell OOMs trying to buffer the output, or job timeout fires.
-  - run_tests.sh never returns valid JSON.
-  - Scheduler records the job as FAILED.
-  - No neighbouring jobs are affected.
+  - Firecracker VM is killed by the OOM killer or the outer job timeout fires.
+  - run_tests.sh never returns its JSON result.
+  - Scheduler records the job as FAILED / TIMEOUT.
+  - No neighbouring jobs are affected (disposable VM, blast radius contained).
 
-Note: nsjail shares the network namespace (-N) but does not restrict stdout/pipe
-buffer sizes; behaviour is identical under both raw and nsjail modes.
+Note: nsjail adds a PID namespace but, with no --max_cpus / --rlimit_nproc, the fork
+bomb still saturates the VM's process table. The only practical difference is that the
+nsjail PID namespace may limit cross-namespace visibility — not the exhaustion itself.
 """
 
-import sys
+import os
 
-LINE = b"X" * 1023 + b"\n"  # ~1 KiB per line
-
-def flood():
-    print("Flooding stdout ...", flush=True)
-    count = 0
+def bomb():
     while True:
-        sys.stdout.buffer.write(LINE)
-        count += 1
-        if count % 10000 == 0:
-            sys.stdout.buffer.flush()
+        os.fork()
 
 if __name__ == "__main__":
-    flood()
+    bomb()
 
 
 
