@@ -214,7 +214,6 @@ def probe_internet_egress() -> None:
     report(name, blocked=True, detail="no internet egress (urllib and curl both failed)")
 
 
-
 # ---------------------------------------------------------------------------
 # Probe 12 — Reach API job-queue endpoint
 # ---------------------------------------------------------------------------
