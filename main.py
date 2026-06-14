@@ -1,45 +1,41 @@
 #!/usr/bin/env python3
 """
-Attack #3 — Disk fill (resource exhaustion / integrity vector)
+Attack #5 — Stdout flood (resource exhaustion / integrity vector)
 
-Writes a large file to /tmp (writable in both raw and nsjail modes) until the
-VM's root filesystem fills up, causing all subsequent writes to fail — including
-the agent's attempt to write the job result.
+Writes gigabytes of data to stdout. run_tests.sh captures stdout into a shell
+variable (`actual=$(...)`) using command substitution, which means the shell must
+buffer the entire output in memory. This exhausts the VM's 256 MiB RAM just like
+the memory exhaustion attack — but through the I/O path instead of direct allocation.
+
+Additionally, even if the shell doesn't buffer (e.g. the output is redirected), the
+volume of data through the vsock channel may exhaust the agent's vsock write buffer or
+cause the result JSON to be silently truncated.
 
 Expected result (both raw and nsjail):
-  - Filesystem fills up; agent cannot write the JSON result to vsock.
-  - Scheduler records the job as FAILED / TIMEOUT.
-  - No neighbouring jobs are affected (each job has its own per-job rootfs copy).
+  - Shell OOMs trying to buffer the output, or job timeout fires.
+  - run_tests.sh never returns valid JSON.
+  - Scheduler records the job as FAILED.
+  - No neighbouring jobs are affected.
 
-Firecracker I/O rate limiter: 512 MiB/s throughput, 4000 IOPS — so the disk fill
-completes quickly. The rootfs image size on disk determines the cap; typically ~1–2 GiB.
-
-Note: in nsjail mode, /tmp is writable (-B /tmp flag in run_student.sh). Writing to
-the student's cwd ($PWD) is also writable (-B "$PWD"). Both paths are targets.
+Note: nsjail shares the network namespace (-N) but does not restrict stdout/pipe
+buffer sizes; behaviour is identical under both raw and nsjail modes.
 """
 
-import os
 import sys
 
-WRITE_PATH = "/tmp/disk_fill_attack"
-CHUNK = b"A" * (1024 * 1024)  # 1 MiB per write
+LINE = b"X" * 1023 + b"\n"  # ~1 KiB per line
 
-def fill():
-    print(f"Writing to {WRITE_PATH} until disk is full ...", flush=True)
-    written_mb = 0
-    try:
-        with open(WRITE_PATH, "wb") as f:
-            while True:
-                f.write(CHUNK)
-                written_mb += 1
-                if written_mb % 100 == 0:
-                    print(f"  written {written_mb} MiB", flush=True)
-    except OSError as e:
-        print(f"Write failed after {written_mb} MiB: {e}", flush=True)
-        sys.exit(1)
+def flood():
+    print("Flooding stdout ...", flush=True)
+    count = 0
+    while True:
+        sys.stdout.buffer.write(LINE)
+        count += 1
+        if count % 10000 == 0:
+            sys.stdout.buffer.flush()
 
 if __name__ == "__main__":
-    fill()
+    flood()
 
 
     
