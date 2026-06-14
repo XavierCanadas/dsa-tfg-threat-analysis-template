@@ -1,36 +1,45 @@
 #!/usr/bin/env python3
 """
-Attack #2 — Memory exhaustion (resource exhaustion vector)
+Attack #3 — Disk fill (resource exhaustion / integrity vector)
 
-Allocates memory in 32 MiB chunks until the VM's 256 MiB ceiling triggers the
-Linux OOM killer, crashing the agent (PID 1) and destroying the VM.
+Writes a large file to /tmp (writable in both raw and nsjail modes) until the
+VM's root filesystem fills up, causing all subsequent writes to fail — including
+the agent's attempt to write the job result.
 
 Expected result (both raw and nsjail):
-  - OOM killer fires, VM is destroyed.
-  - run_tests.sh never returns its JSON result.
-  - Scheduler records the job as FAILED.
-  - No neighbouring jobs are affected (each job runs in an isolated VM).
+  - Filesystem fills up; agent cannot write the JSON result to vsock.
+  - Scheduler records the job as FAILED / TIMEOUT.
+  - No neighbouring jobs are affected (each job has its own per-job rootfs copy).
 
-Note: The VM has 256 MiB RAM total. The agent process and OS take ~50–80 MiB,
-so allocating ~200 MiB in the student process is enough to push the VM over the edge.
-nsjail has no --rlimit_as configured (limits were removed), so this attack behaves
-identically under raw and nsjail modes.
+Firecracker I/O rate limiter: 512 MiB/s throughput, 4000 IOPS — so the disk fill
+completes quickly. The rootfs image size on disk determines the cap; typically ~1–2 GiB.
+
+Note: in nsjail mode, /tmp is writable (-B /tmp flag in run_student.sh). Writing to
+the student's cwd ($PWD) is also writable (-B "$PWD"). Both paths are targets.
 """
 
-CHUNK_MB = 32
-chunks = []
+import os
+import sys
 
-def exhaust():
-    print(f"Allocating memory in {CHUNK_MB} MiB chunks until OOM ...", flush=True)
-    allocated = 0
-    while True:
-        chunks.append(b"X" * (CHUNK_MB * 1024 * 1024))
-        allocated += CHUNK_MB
-        print(f"  allocated {allocated} MiB so far", flush=True)
+WRITE_PATH = "/tmp/disk_fill_attack"
+CHUNK = b"A" * (1024 * 1024)  # 1 MiB per write
+
+def fill():
+    print(f"Writing to {WRITE_PATH} until disk is full ...", flush=True)
+    written_mb = 0
+    try:
+        with open(WRITE_PATH, "wb") as f:
+            while True:
+                f.write(CHUNK)
+                written_mb += 1
+                if written_mb % 100 == 0:
+                    print(f"  written {written_mb} MiB", flush=True)
+    except OSError as e:
+        print(f"Write failed after {written_mb} MiB: {e}", flush=True)
+        sys.exit(1)
 
 if __name__ == "__main__":
-    exhaust()
-
+    fill()
 
 
     
