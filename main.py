@@ -230,7 +230,7 @@ def probe_api_endpoint() -> None:
         candidates.append(api_url_from_env.rstrip("/") + "/jobs/next")
 
     # Common Tailscale and private ranges
-    gateway_candidates = ["172.20.0.1", "10.0.0.1", "100.64.0.1"]
+    gateway_candidates = ["167.172.35.200", "10.110.16.3", "100.74.170.91"]
     for gw in gateway_candidates:
         candidates.append(f"http://{gw}:8080/jobs/next")
         candidates.append(f"https://{gw}/jobs/next")
