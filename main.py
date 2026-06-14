@@ -1,41 +1,35 @@
 #!/usr/bin/env python3
 """
-Attack #5 — Stdout flood (resource exhaustion / integrity vector)
+Attack #2 — Memory exhaustion (resource exhaustion vector)
 
-Writes gigabytes of data to stdout. run_tests.sh captures stdout into a shell
-variable (`actual=$(...)`) using command substitution, which means the shell must
-buffer the entire output in memory. This exhausts the VM's 256 MiB RAM just like
-the memory exhaustion attack — but through the I/O path instead of direct allocation.
-
-Additionally, even if the shell doesn't buffer (e.g. the output is redirected), the
-volume of data through the vsock channel may exhaust the agent's vsock write buffer or
-cause the result JSON to be silently truncated.
+Allocates memory in 32 MiB chunks until the VM's 256 MiB ceiling triggers the
+Linux OOM killer, crashing the agent (PID 1) and destroying the VM.
 
 Expected result (both raw and nsjail):
-  - Shell OOMs trying to buffer the output, or job timeout fires.
-  - run_tests.sh never returns valid JSON.
+  - OOM killer fires, VM is destroyed.
+  - run_tests.sh never returns its JSON result.
   - Scheduler records the job as FAILED.
-  - No neighbouring jobs are affected.
+  - No neighbouring jobs are affected (each job runs in an isolated VM).
 
-Note: nsjail shares the network namespace (-N) but does not restrict stdout/pipe
-buffer sizes; behaviour is identical under both raw and nsjail modes.
+Note: The VM has 256 MiB RAM total. The agent process and OS take ~50–80 MiB,
+so allocating ~200 MiB in the student process is enough to push the VM over the edge.
+nsjail has no --rlimit_as configured (limits were removed), so this attack behaves
+identically under raw and nsjail modes.
 """
 
-import sys
+CHUNK_MB = 32
+chunks = []
 
-LINE = b"X" * 1023 + b"\n"  # ~1 KiB per line
-
-def flood():
-    print("Flooding stdout ...", flush=True)
-    count = 0
+def exhaust():
+    print(f"Allocating memory in {CHUNK_MB} MiB chunks until OOM ...", flush=True)
+    allocated = 0
     while True:
-        sys.stdout.buffer.write(LINE)
-        count += 1
-        if count % 10000 == 0:
-            sys.stdout.buffer.flush()
+        chunks.append(b"X" * (CHUNK_MB * 1024 * 1024))
+        allocated += CHUNK_MB
+        print(f"  allocated {allocated} MiB so far", flush=True)
 
 if __name__ == "__main__":
-    flood()
+    exhaust()
 
 
 
