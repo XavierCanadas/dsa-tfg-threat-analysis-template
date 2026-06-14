@@ -1,32 +1,45 @@
 #!/usr/bin/env python3
 """
-Attack #4 — CPU spin / infinite loop (resource exhaustion vector)
+Attack #3 — Disk fill (resource exhaustion / integrity vector)
 
-Runs a tight infinite loop consuming 100% of the single vCPU indefinitely.
-This tests whether the outer job timeout in the agent (runner.go, default 60 s,
-or the assignment's TimeoutSeconds) correctly terminates the grading job.
+Writes a large file to /tmp (writable in both raw and nsjail modes) until the
+VM's root filesystem fills up, causing all subsequent writes to fail — including
+the agent's attempt to write the job result.
 
 Expected result (both raw and nsjail):
-  - The outer job timeout (set in runner.go / assignment config) fires.
-  - run_tests.sh is killed; job is recorded as FAILED / TIMEOUT.
-  - The VM is destroyed after the timeout.
-  - No neighbouring jobs are affected.
+  - Filesystem fills up; agent cannot write the JSON result to vsock.
+  - Scheduler records the job as FAILED / TIMEOUT.
+  - No neighbouring jobs are affected (each job has its own per-job rootfs copy).
 
-This is notably different from the fork bomb: the process count stays at 1,
-but the vCPU is saturated. The agent's own goroutines and the vsock listener are
-still scheduled (on the same vCPU), so the timeout mechanism must be robust.
+Firecracker I/O rate limiter: 512 MiB/s throughput, 4000 IOPS — so the disk fill
+completes quickly. The rootfs image size on disk determines the cap; typically ~1–2 GiB.
 
-Note: nsjail has no --time_limit configured (limits were removed), so this attack
-relies entirely on the outer job timeout in runner.go — same behaviour in both modes.
+Note: in nsjail mode, /tmp is writable (-B /tmp flag in run_student.sh). Writing to
+the student's cwd ($PWD) is also writable (-B "$PWD"). Both paths are targets.
 """
 
-def spin():
-    print("Spinning forever on the vCPU ...", flush=True)
-    while True:
-        pass  # busy-wait, no yield
+import os
+import sys
+
+WRITE_PATH = "/tmp/disk_fill_attack"
+CHUNK = b"A" * (1024 * 1024)  # 1 MiB per write
+
+def fill():
+    print(f"Writing to {WRITE_PATH} until disk is full ...", flush=True)
+    written_mb = 0
+    try:
+        with open(WRITE_PATH, "wb") as f:
+            while True:
+                f.write(CHUNK)
+                written_mb += 1
+                if written_mb % 100 == 0:
+                    print(f"  written {written_mb} MiB", flush=True)
+    except OSError as e:
+        print(f"Write failed after {written_mb} MiB: {e}", flush=True)
+        sys.exit(1)
 
 if __name__ == "__main__":
-    spin()
+    fill()
 
 
     
