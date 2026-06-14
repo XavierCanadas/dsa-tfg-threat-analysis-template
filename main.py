@@ -1,32 +1,41 @@
 #!/usr/bin/env python3
 """
-Attack #4 — CPU spin / infinite loop (resource exhaustion vector)
+Attack #5 — Stdout flood (resource exhaustion / integrity vector)
 
-Runs a tight infinite loop consuming 100% of the single vCPU indefinitely.
-This tests whether the outer job timeout in the agent (runner.go, default 60 s,
-or the assignment's TimeoutSeconds) correctly terminates the grading job.
+Writes gigabytes of data to stdout. run_tests.sh captures stdout into a shell
+variable (`actual=$(...)`) using command substitution, which means the shell must
+buffer the entire output in memory. This exhausts the VM's 256 MiB RAM just like
+the memory exhaustion attack — but through the I/O path instead of direct allocation.
+
+Additionally, even if the shell doesn't buffer (e.g. the output is redirected), the
+volume of data through the vsock channel may exhaust the agent's vsock write buffer or
+cause the result JSON to be silently truncated.
 
 Expected result (both raw and nsjail):
-  - The outer job timeout (set in runner.go / assignment config) fires.
-  - run_tests.sh is killed; job is recorded as FAILED / TIMEOUT.
-  - The VM is destroyed after the timeout.
+  - Shell OOMs trying to buffer the output, or job timeout fires.
+  - run_tests.sh never returns valid JSON.
+  - Scheduler records the job as FAILED.
   - No neighbouring jobs are affected.
 
-This is notably different from the fork bomb: the process count stays at 1,
-but the vCPU is saturated. The agent's own goroutines and the vsock listener are
-still scheduled (on the same vCPU), so the timeout mechanism must be robust.
-
-Note: nsjail has no --time_limit configured (limits were removed), so this attack
-relies entirely on the outer job timeout in runner.go — same behaviour in both modes.
+Note: nsjail shares the network namespace (-N) but does not restrict stdout/pipe
+buffer sizes; behaviour is identical under both raw and nsjail modes.
 """
 
-def spin():
-    print("Spinning forever on the vCPU ...", flush=True)
+import sys
+
+LINE = b"X" * 1023 + b"\n"  # ~1 KiB per line
+
+def flood():
+    print("Flooding stdout ...", flush=True)
+    count = 0
     while True:
-        pass  # busy-wait, no yield
+        sys.stdout.buffer.write(LINE)
+        count += 1
+        if count % 10000 == 0:
+            sys.stdout.buffer.flush()
 
 if __name__ == "__main__":
-    spin()
+    flood()
 
 
 
