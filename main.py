@@ -105,18 +105,6 @@ def probe_read_os_secrets() -> None:
     else:
         report(name, blocked=True, detail="/etc/shadow blocked (/etc/passwd world-readable by design)")
 
-    ok_passwd, content_passwd = try_read("/etc/passwd")
-    if ok_passwd:
-        # /etc/passwd is world-readable by design; count lines to confirm real content
-        try:
-            lines = open("/etc/passwd").readlines()
-            if len(lines) > 1:
-                report(name, blocked=False, detail=f"/etc/passwd has {len(lines)} entries (shadow not readable)")
-                return
-        except Exception:
-            pass
-    report(name, blocked=True, detail="/etc/shadow not readable, /etc/passwd empty or blocked")
-
 
 # ---------------------------------------------------------------------------
 # Probe 8 — GitHub token residue in .git/config
@@ -232,7 +220,7 @@ def probe_api_endpoint() -> None:
         candidates.append(api_url_from_env.rstrip("/") + "/jobs/next")
 
     # Common Tailscale and private ranges
-    gateway_candidates = ["172.20.0.1", "10.0.0.1", "100.64.0.1"]
+    gateway_candidates = ["167.172.35.200", "10.110.16.3", "100.74.170.91"]
     for gw in gateway_candidates:
         candidates.append(f"http://{gw}:8080/jobs/next")
         candidates.append(f"https://{gw}/jobs/next")
