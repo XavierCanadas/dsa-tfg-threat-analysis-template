@@ -89,7 +89,7 @@ def probe_read_teacher_repo() -> None:
     # Also try listing the directory
     try:
         entries = os.listdir("/repos/teacher")
-        report(name, blocked=False, detail=f"listed /repos/teacher: {entries[:5]}")
+        report(name, blocked=not entries, detail=(f"listed: {entries[:5]}" if entries else "empty (tmpfs shadow)"))
     except Exception:
         report(name, blocked=True, detail="cannot read or list /repos/teacher")
 
@@ -99,10 +99,12 @@ def probe_read_teacher_repo() -> None:
 # ---------------------------------------------------------------------------
 def probe_read_os_secrets() -> None:
     name = "read_os_secrets"
-    ok_shadow, content_shadow = try_read("/etc/shadow")
-    if ok_shadow:
-        report(name, blocked=False, detail=f"/etc/shadow readable: {content_shadow[:60]}")
-        return
+    ok_shadow, c = try_read("/etc/shadow")
+    if ok_shadow and c.strip():
+        report(name, blocked=False, detail=f"/etc/shadow readable: {c[:60]}")
+    else:
+        report(name, blocked=True, detail="/etc/shadow blocked (/etc/passwd world-readable by design)")
+
     ok_passwd, content_passwd = try_read("/etc/passwd")
     if ok_passwd:
         # /etc/passwd is world-readable by design; count lines to confirm real content
@@ -346,7 +348,7 @@ def probe_privilege() -> None:
 
     detail_str = " | ".join(details)
     # "LEAKED" if root or if we can read /proc/1/environ
-    leaked = is_root or ok_env
+    leaked = is_root or (ok_env and len(env_content) > 0)
     report(name, blocked=not leaked, detail=detail_str)
 
 
